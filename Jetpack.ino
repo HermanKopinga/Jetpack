@@ -34,6 +34,8 @@
 #include <SoftwareSerial.h> // Maybe we can get rid of this one?
 #include "Adafruit_FONA.h"
 #include "Adafruit_BLE_UART.h"
+#include <stdio.h> // for function sprintf
+
 
 /**********
  FONA
@@ -83,7 +85,7 @@ Adafruit_GPS GPS(&GPSSerial);
 
 // Set GPSECHO to 'false' to turn off echoing the GPS data to the Serial console
 // Set to 'true' if you want to debug and listen to the raw GPS sentences. 
-#define GPSECHO  true
+#define GPSECHO  false
 
 // For GPS
 uint32_t timer = millis();
@@ -114,6 +116,7 @@ void useInterrupt(boolean); // Func prototype keeps Arduino 0023 happy
 #define MAGENTA         0xF81F
 #define YELLOW          0xFFE0  
 #define WHITE           0xFFFF
+#define GREY            0x38E7
 
 // Option 1: use any pins but a little slower
 Adafruit_SSD1331 display = Adafruit_SSD1331(cs, dc, mosi, sclk, rst);  
@@ -240,6 +243,12 @@ void setup(void) {
   
   // Initialize display
   display.begin();
+  display.fillScreen(BLACK);  
+  display.setTextColor(YELLOW);
+  display.print("Spindle");
+  display.setTextColor(WHITE, BLACK);  
+  display.print(" Jetpack\n\n");
+
 }
 
 
@@ -249,18 +258,35 @@ void loop() {
 ***********/  
    sensors_vec_t   orientation; 
   // Use the simple AHRS function to get the current orientation.
-  if (millis() - lastMillis > 2000 && ahrs.getOrientation(&orientation))
+  if (millis() - lastMillis > 1000 && ahrs.getOrientation(&orientation))
   {
-    display.fillScreen(BLACK);
-    display.setCursor(0,0);
-    display.print("Spindle Jetpack\n\n");
-    /* 'orientation' should have valid .roll and .pitch fields */
-    display.print(orientation.roll);
-    display.print(F(" "));
-    display.print(orientation.pitch);
-    display.print(F(" "));
-    display.print(orientation.heading);
-    display.println(F(""));
+    int heading = orientation.heading + 180;
+    display.setCursor(0,57);
+    if (heading < 0) {
+      display.print("??");
+      display.print(heading);                
+    } else if (heading < 23) {
+      display.print("W ");
+    } else if (heading < 68) {
+      display.print("ZW");      
+    } else if (heading < 113) { 
+      display.print("Z ");
+    } else if (heading < 158) {
+      display.print("ZO");      
+    } else if (heading < 203) {
+      display.print("O ");
+    } else if (heading < 248) {
+      display.print("NO");      
+    } else if (heading < 293) {
+      display.print("N ");
+    } else if (heading < 338) {
+      display.print("NW");      
+    } else if (heading < 361) {
+      display.print("W ");
+    } else {
+      display.print("??");
+      display.print(heading);          
+    }
     lastMillis = millis();
   }
   
@@ -292,14 +318,15 @@ void loop() {
   // if millis() or timer wraps around, we'll just reset it
   if (timer > millis())  timer = millis();
 
-  // approximately every 2 seconds or so, print out the current stats
-  if (millis() - timer > 2000) { 
+  // approximately every 10 seconds or so, print out the current stats
+  if (millis() - timer > 10000) { 
     timer = millis(); // reset the timer
-    
-    display.print(GPS.hour, DEC); display.print(':');
-    display.print(GPS.minute, DEC); display.print(':');
-    display.print(GPS.seconds, DEC); display.print(" GMT");
-    
+    char time[5];
+    // ToDo: timezone implementation
+    sprintf(time, "%02d:%02d", GPS.hour+1, GPS.minute);
+    display.setCursor(65,57);
+    display.print(time);
+    /*
     Serial.print("\nTime: ");
     Serial.print(GPS.hour, DEC); Serial.print(':');
     Serial.print(GPS.minute, DEC); Serial.print(':');
@@ -310,9 +337,12 @@ void loop() {
     Serial.print(GPS.month, DEC); Serial.print("/20");
     Serial.println(GPS.year, DEC);
     Serial.print("Fix: "); Serial.print((int)GPS.fix);
-    Serial.print(" quality: "); Serial.println((int)GPS.fixquality); 
+    Serial.print(" quality: "); Serial.println((int)GPS.fixquality); */
     if (GPS.fix) {
-      Serial.print("Location: ");
+      display.drawChar(91,0,'*',WHITE,BLACK,1);
+      /*display.print(GPS.latitude, 4); display.print(':');
+      display.println(GPS.longitude, 4);*/
+      /*Serial.print("Location: ");
       Serial.print(GPS.latitude, 4); Serial.print(GPS.lat);
       Serial.print(", "); 
       Serial.print(GPS.longitude, 4); Serial.println(GPS.lon);
@@ -320,7 +350,10 @@ void loop() {
       Serial.print("Speed (knots): "); Serial.println(GPS.speed);
       Serial.print("Angle: "); Serial.println(GPS.angle);
       Serial.print("Altitude: "); Serial.println(GPS.altitude);
-      Serial.print("Satellites: "); Serial.println((int)GPS.satellites);
+      Serial.print("Satellites: "); Serial.println((int)GPS.satellites);*/      
+    }
+    else {
+      display.drawChar(91,0,'+',RED,BLACK,1);
     }
   }  
 
@@ -419,7 +452,10 @@ void loop() {
           if (n == 2) Serial.println(F("Not registered (searching)"));
           if (n == 3) Serial.println(F("Denied"));
           if (n == 4) Serial.println(F("Unknown"));
-          if (n == 5) Serial.println(F("Registered roaming"));
+          if (n == 5) {
+            Serial.println(F("Registered roaming"));
+            display.drawChar(0,8,'-',GREY,BLACK,1);
+          }
           break;
       }
       
@@ -874,12 +910,15 @@ void loop() {
     // print it out!
     if (status == ACI_EVT_DEVICE_STARTED) {
         Serial.println(F("* Advertising started"));
+        display.drawChar(91,8,'b',WHITE,BLACK,1);        
     }
     if (status == ACI_EVT_CONNECTED) {
         Serial.println(F("* Connected!"));
+        display.drawChar(91,8,'B',BLUE,BLACK,1);        
     }
     if (status == ACI_EVT_DISCONNECTED) {
         Serial.println(F("* Disconnected or advertising timed out"));
+        display.drawChar(91,8,'b',WHITE,BLACK,1);        
     }
     // OK set the last status change to this one
     laststatus = status;
