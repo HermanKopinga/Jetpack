@@ -33,14 +33,32 @@
 #include <Adafruit_NeoPixel.h>
 #include <SoftwareSerial.h> // Maybe we can get rid of this one?
 #include "Adafruit_FONA.h"
+#include "Adafruit_BLE_UART.h"
 
+/**********
+ FONA
+***********/
 #define FONA_RST 4
 char replybuffer[255];
 Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
 uint8_t readline(char *buff, uint8_t maxbuff, uint16_t timeout = 0);
 
+/**********
+ BLUETOOTH
+***********/
+// Connect CLK/MISO/MOSI to hardware SPI
+// e.g. On UNO & compatible: CLK = 13, MISO = 12, MOSI = 11
+#define ADAFRUITBLE_REQ 15
+#define ADAFRUITBLE_RDY 17     // This should be an interrupt pin, on Uno thats #2 or #3
+#define ADAFRUITBLE_RST 16
 
+Adafruit_BLE_UART BTLEserial = Adafruit_BLE_UART(ADAFRUITBLE_REQ, ADAFRUITBLE_RDY, ADAFRUITBLE_RST);
+// Constantly checks for new events on the nRF8001
+aci_evt_opcode_t laststatus = ACI_EVT_DISCONNECTED;
 
+/**********
+ NEOPIXELS 
+***********/
 // Parameter 1 = number of pixels in strip
 // Parameter 2 = Arduino pin number (most are valid)
 // Parameter 3 = pixel type flags, add together as needed:
@@ -50,6 +68,9 @@ uint8_t readline(char *buff, uint8_t maxbuff, uint16_t timeout = 0);
 //   NEO_RGB     Pixels are wired for RGB bitstream (v1 FLORA pixels, not v2)
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(8, 6, NEO_GRB + NEO_KHZ800);
 
+/**********
+ GPS 
+***********/
 // You should make the following connections with the Due and GPS module:
 // GPS power pin to Arduino Due 3.3V output.
 // GPS ground pin to Arduino Due ground.
@@ -64,6 +85,13 @@ Adafruit_GPS GPS(&GPSSerial);
 // Set to 'true' if you want to debug and listen to the raw GPS sentences. 
 #define GPSECHO  true
 
+// For GPS
+uint32_t timer = millis();
+uint32_t lastMillis = 0;
+
+/**********
+ OLED
+***********/
 // this keeps track of whether we're using the interrupt
 // off by default!
 boolean usingInterrupt = false;
@@ -71,12 +99,11 @@ void useInterrupt(boolean); // Func prototype keeps Arduino 0023 happy
 
 // Display pins
 // You can use any (4 or) 5 pins 
-#define sclk 13
-#define mosi 11
+#define sclk 20
+#define mosi 21
 #define cs   10
 #define rst  9
 #define dc   5
-
 
 // Color definitions
 #define	BLACK           0x0000
@@ -97,6 +124,9 @@ Adafruit_SSD1331 display = Adafruit_SSD1331(cs, dc, mosi, sclk, rst);
 // to use the microSD card (see the image drawing example)
 //Adafruit_SSD1331 display = Adafruit_SSD1331(cs, dc, rst);
 
+/************
+ 9DOF & AHRS
+*************/
 float p = 3.1415926;
 
 // Create LSM9DS0 board instance.
@@ -130,12 +160,13 @@ void configureLSM9DS0(void)
 }
 
 void setup(void) {
-  while (!Serial);
   
+  // This boudrate is ignored by Teensy, always runs at full USB speed.
   Serial.begin(115200);  
-  Serial.println(F("Adafruit LSM9DS0 9 DOF Board AHRS Example")); Serial.println("");
+  Serial.println(F("Adafruit LSM9DS0 9 DOF Board AHRS Example"));
+  Serial.println(F("Adafruit Bluefruit Low Energy nRF8001 Print echo demo"));
   Serial.println("Adafruit GPS library basic test!");
-  Serial.println(F("FONA basic test"));
+  Serial.println(F("Adafruit FONA basic test"));
   Serial.println(F("Initializing....(May take 3 seconds)"));
 
   Serial1.begin(4800); // FONA if you're using hardware serial
@@ -155,6 +186,8 @@ void setup(void) {
   }
 
   printMenu();
+
+  BTLEserial.begin();
 
 
   // 9600 NMEA is the default baud rate for Adafruit MTK GPS's- some use 4800
@@ -209,84 +242,11 @@ void setup(void) {
   display.begin();
 }
 
-void printMenu(void) {
-   Serial.println(F("-------------------------------------"));
-   Serial.println(F("[?] Print this menu"));
-   Serial.println(F("[a] read the ADC (2.8V max)"));
-   Serial.println(F("[b] read the Battery V and % charged"));
-   Serial.println(F("[C] read the SIM CCID"));
-   Serial.println(F("[U] Unlock SIM with PIN code"));
-   Serial.println(F("[i] read RSSI"));
-   Serial.println(F("[n] get Network status"));
-   Serial.println(F("[v] set audio Volume"));
-   Serial.println(F("[V] get Volume"));
-   Serial.println(F("[H] set Headphone audio"));
-   Serial.println(F("[e] set External audio"));
-   Serial.println(F("[T] play audio Tone"));
-   Serial.println(F("[f] tune FM radio"));
-   Serial.println(F("[F] turn off FM"));
-   Serial.println(F("[m] set FM volume"));
-   Serial.println(F("[M] get FM volume"));
-   Serial.println(F("[q] get FM station signal level"));
-   Serial.println(F("[P] PWM/Buzzer out"));
-   Serial.println(F("[c] make phone Call"));
-   Serial.println(F("[h] Hang up phone"));
-   Serial.println(F("[p] Pick up phone"));
-   Serial.println(F("[N] Number of SMSs"));
-   Serial.println(F("[r] Read SMS #"));
-   Serial.println(F("[R] Read All SMS"));
-   Serial.println(F("[d] Delete SMS #"));
-   Serial.println(F("[s] Send SMS"));
-   Serial.println(F("[y] Enable network time sync"));   
-   Serial.println(F("[Y] Enable NTP time sync (GPRS)"));   
-   Serial.println(F("[t] Get network time"));   
-   Serial.println(F("[G] Enable GPRS"));
-   Serial.println(F("[g] Disable GPRS"));
-   Serial.println(F("[l] Query GSMLOC (GPRS)"));
-   Serial.println(F("[w] Read webpage (GPRS)"));
-   Serial.println(F("[W] Post to website (GPRS)"));
-   Serial.println(F("[S] create Serial passthru tunnel"));
-   Serial.println(F("-------------------------------------"));
-   Serial.println(F(""));
-  
-}
-
-
-#ifdef __AVR__
-// Interrupt is called once a millisecond, looks for any new GPS data, and stores it
-SIGNAL(TIMER0_COMPA_vect) {
-  char c = GPS.read();
-  // if you want to debug, this is a good time to do it!
-#ifdef UDR0
-  if (GPSECHO)
-    if (c) UDR0 = c;  
-    // writing direct to UDR0 is much much faster than Serial.print 
-    // but only one character can be written at a time. 
-#endif
-}
-
-void useInterrupt(boolean v) {
-  if (v) {
-    // Timer0 is already used for millis() - we'll just interrupt somewhere
-    // in the middle and call the "Compare A" function above
-    OCR0A = 0xAF;
-    TIMSK0 |= _BV(OCIE0A);
-    usingInterrupt = true;
-  } else {
-    // do not call the interrupt function COMPA anymore
-    TIMSK0 &= ~_BV(OCIE0A);
-    usingInterrupt = false;
-  }
-}
-#endif //#ifdef__AVR__
-
-
-
-// For GPS
-uint32_t timer = millis();
-uint32_t lastMillis = 0;
 
 void loop() {
+/**********
+  9DOF & AHRS
+***********/  
    sensors_vec_t   orientation; 
   // Use the simple AHRS function to get the current orientation.
   if (millis() - lastMillis > 2000 && ahrs.getOrientation(&orientation))
@@ -304,7 +264,9 @@ void loop() {
     lastMillis = millis();
   }
   
-  // GPS
+/**********
+ GPS
+***********/
   
   // in case you are not using the interrupt above, you'll
   // need to 'hand query' the GPS, not suggested :(
@@ -362,6 +324,9 @@ void loop() {
     }
   }  
 
+/**********
+ GSM/FONA
+***********/  
   if (Serial.available()) {
   char command = Serial.read();
     Serial.println(command);
@@ -896,7 +861,63 @@ void loop() {
     }    
   }
 
-  
+/**********
+ BLUETOOTH
+***********/
+ // Tell the nRF8001 to do whatever it should be working on.
+  BTLEserial.pollACI();
+
+  // Ask what is our current status
+  aci_evt_opcode_t status = BTLEserial.getState();
+  // If the status changed....
+  if (status != laststatus) {
+    // print it out!
+    if (status == ACI_EVT_DEVICE_STARTED) {
+        Serial.println(F("* Advertising started"));
+    }
+    if (status == ACI_EVT_CONNECTED) {
+        Serial.println(F("* Connected!"));
+    }
+    if (status == ACI_EVT_DISCONNECTED) {
+        Serial.println(F("* Disconnected or advertising timed out"));
+    }
+    // OK set the last status change to this one
+    laststatus = status;
+  }
+
+  if (status == ACI_EVT_CONNECTED) {
+    // Lets see if there's any data for us!
+    if (BTLEserial.available()) {
+      Serial.print("* "); Serial.print(BTLEserial.available()); Serial.println(F(" bytes available from BTLE"));
+    }
+    // OK while we still have something to read, get a character and print it out
+    while (BTLEserial.available()) {
+      char c = BTLEserial.read();
+      Serial.print(c);
+    }
+
+    // Next up, see if we have any data to get from the Serial console
+
+    if (Serial.available()) {
+      // Read a line from Serial
+      Serial.setTimeout(100); // 100 millisecond timeout
+      String s = Serial.readString();
+
+      // We need to convert the line to bytes, no more than 20 at this time
+      uint8_t sendbuffer[20];
+      s.getBytes(sendbuffer, 20);
+      char sendbuffersize = min(20, s.length());
+
+      Serial.print(F("\n* Sending -> \"")); Serial.print((char *)sendbuffer); Serial.println("\"");
+
+      // write the data
+      BTLEserial.write(sendbuffer, sendbuffersize);
+    }
+  }
+
+/**********
+ NEOPIXELS
+***********/  
   // NeoPixels constant value.
   strip.setPixelColor(0, strip.Color(GPS.minute/4,GPS.hour/2,GPS.seconds/4));
   strip.setPixelColor(1, strip.Color(1,0,0));
@@ -969,3 +990,74 @@ uint8_t readline(char *buff, uint8_t maxbuff, uint16_t timeout) {
   buff[buffidx] = 0;  // null term
   return buffidx;
 }
+
+void printMenu(void) {
+   Serial.println(F("-------------------------------------"));
+   Serial.println(F("[?] Print this menu"));
+   Serial.println(F("[a] read the ADC (2.8V max)"));
+   Serial.println(F("[b] read the Battery V and % charged"));
+   Serial.println(F("[C] read the SIM CCID"));
+   Serial.println(F("[U] Unlock SIM with PIN code"));
+   Serial.println(F("[i] read RSSI"));
+   Serial.println(F("[n] get Network status"));
+   Serial.println(F("[v] set audio Volume"));
+   Serial.println(F("[V] get Volume"));
+   Serial.println(F("[H] set Headphone audio"));
+   Serial.println(F("[e] set External audio"));
+   Serial.println(F("[T] play audio Tone"));
+   Serial.println(F("[f] tune FM radio"));
+   Serial.println(F("[F] turn off FM"));
+   Serial.println(F("[m] set FM volume"));
+   Serial.println(F("[M] get FM volume"));
+   Serial.println(F("[q] get FM station signal level"));
+   Serial.println(F("[P] PWM/Buzzer out"));
+   Serial.println(F("[c] make phone Call"));
+   Serial.println(F("[h] Hang up phone"));
+   Serial.println(F("[p] Pick up phone"));
+   Serial.println(F("[N] Number of SMSs"));
+   Serial.println(F("[r] Read SMS #"));
+   Serial.println(F("[R] Read All SMS"));
+   Serial.println(F("[d] Delete SMS #"));
+   Serial.println(F("[s] Send SMS"));
+   Serial.println(F("[y] Enable network time sync"));   
+   Serial.println(F("[Y] Enable NTP time sync (GPRS)"));   
+   Serial.println(F("[t] Get network time"));   
+   Serial.println(F("[G] Enable GPRS"));
+   Serial.println(F("[g] Disable GPRS"));
+   Serial.println(F("[l] Query GSMLOC (GPRS)"));
+   Serial.println(F("[w] Read webpage (GPRS)"));
+   Serial.println(F("[W] Post to website (GPRS)"));
+   Serial.println(F("[S] create Serial passthru tunnel"));
+   Serial.println(F("-------------------------------------"));
+   Serial.println(F(""));
+  
+}
+
+
+#ifdef __AVR__
+// Interrupt is called once a millisecond, looks for any new GPS data, and stores it
+SIGNAL(TIMER0_COMPA_vect) {
+  char c = GPS.read();
+  // if you want to debug, this is a good time to do it!
+#ifdef UDR0
+  if (GPSECHO)
+    if (c) UDR0 = c;  
+    // writing direct to UDR0 is much much faster than Serial.print 
+    // but only one character can be written at a time. 
+#endif
+}
+
+void useInterrupt(boolean v) {
+  if (v) {
+    // Timer0 is already used for millis() - we'll just interrupt somewhere
+    // in the middle and call the "Compare A" function above
+    OCR0A = 0xAF;
+    TIMSK0 |= _BV(OCIE0A);
+    usingInterrupt = true;
+  } else {
+    // do not call the interrupt function COMPA anymore
+    TIMSK0 &= ~_BV(OCIE0A);
+    usingInterrupt = false;
+  }
+}
+#endif //#ifdef__AVR__
