@@ -1,26 +1,14 @@
-/*************************************************** 
-  This is a example sketch demonstrating the graphics
-  capabilities of the SSD1331 library  for the 0.96" 
-  16-bit Color OLED with SSD1331 driver chip
+// Jetpack for devhouse Spindle.
+// By: herman@kopinga.nl
+// BSD license
 
-  Pick one up today in the adafruit shop!
-  ------> http://www.adafruit.com/products/684
-
-  These displays use SPI to communicate, 4 or 5 pins are required to  
-  interface
-  Adafruit invests time and resources providing this open source code, 
-  please support Adafruit and open-source hardware by purchasing 
-  products from Adafruit!
-
-  Written by Limor Fried/Ladyada for Adafruit Industries.  
-  BSD license, all text above must be included in any redistribution
- ****************************************************/
-
-// Other credits:
+// Stands of the shoulders of:
 // Test code for Adafruit GPS modules using MTK3329/MTK3339 driver
-// Pick one up today at the Adafruit electronics shop 
-// and help support open source hardware & software! -ada
-
+// Example sketch demonstrating the graphics capabilities of the SSD1331 library
+// Adafruit LSM9DS0 9 DOF Board AHRS Example
+// Adafruit Bluefruit Low Energy nRF8001 Print echo demo
+// Adafruit GPS library basic test!
+// Adafruit FONA basic test
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1331.h>
@@ -30,23 +18,24 @@
 #include <Adafruit_LSM9DS0.h>
 #include <Adafruit_Simple_AHRS.h>
 #include <Adafruit_GPS.h>
-#include <Adafruit_NeoPixel.h>
 #include <SoftwareSerial.h> // Maybe we can get rid of this one?
 #include "Adafruit_FONA.h"
 #include "Adafruit_BLE_UART.h"
 #include <stdio.h> // for function sprintf
 #include "keys.h"
+#include "Location.h"
+#include <Bounce.h>
+
 
 /**********
  FONA
 ***********/
 #define FONA_RST 4
-#define FONA_KEY 3
-#define FONA_PS 2
 char replybuffer[255];
 Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
 uint8_t readline(char *buff, uint8_t maxbuff, uint16_t timeout = 0);
 uint16_t battpercent = 0;
+Location current_location = Location();
 
 /**********
  BLUETOOTH
@@ -60,18 +49,6 @@ uint16_t battpercent = 0;
 Adafruit_BLE_UART BTLEserial = Adafruit_BLE_UART(ADAFRUITBLE_REQ, ADAFRUITBLE_RDY, ADAFRUITBLE_RST);
 // Constantly checks for new events on the nRF8001
 aci_evt_opcode_t laststatus = ACI_EVT_DISCONNECTED;
-
-/**********
- NEOPIXELS 
-***********/
-// Parameter 1 = number of pixels in strip
-// Parameter 2 = Arduino pin number (most are valid)
-// Parameter 3 = pixel type flags, add together as needed:
-//   NEO_KHZ800  800 KHz bitstream (most NeoPixel products w/WS2812 LEDs)
-//   NEO_KHZ400  400 KHz (classic 'v1' (not v2) FLORA pixels, WS2811 drivers)
-//   NEO_GRB     Pixels are wired for GRB bitstream (most NeoPixel products)
-//   NEO_RGB     Pixels are wired for RGB bitstream (v1 FLORA pixels, not v2)
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(8, 6, NEO_GRB + NEO_KHZ800);
 
 /**********
  GPS 
@@ -147,6 +124,14 @@ void configureLSM9DS0(void)
   lsm.setupGyro(lsm.LSM9DS0_GYROSCALE_245DPS);  // 3.) Setup the gyroscope
 }
 
+// Housekeeping
+uint32_t timer = millis();
+uint32_t lastMillis9dof = 0;
+uint32_t lastMillisFona = 0;
+Bounce button0 = Bounce(22, 10);
+Bounce button1 = Bounce(23, 10);
+int largebatt = 0;
+
 void setup(void) {
   // Initialize display first
   display.begin();
@@ -155,54 +140,23 @@ void setup(void) {
   display.print("Spindle");
   display.setTextColor(WHITE, BLACK);  
   display.print(" Jetpack\n\n");
-
-  display.print("Serial");  
+  
+  display.print("Serial");   
   
   // This boudrate is ignored by Teensy, always runs at full USB speed.
   Serial.begin(115200);  
-//  while (!Serial);
-  Serial.println(F("Adafruit LSM9DS0 9 DOF Board AHRS Example"));
-  Serial.println(F("Adafruit Bluefruit Low Energy nRF8001 Print echo demo"));
-  Serial.println("Adafruit GPS library basic test!");
-  Serial.println(F("Adafruit FONA basic test"));
-  Serial.println(F("Initializing....(May take 3 seconds)"));
+  Serial.println(F("Initializing FONA.... (May take 3 seconds)"));
 
   display.print("...\nFona");
-  
+
   Serial1.begin(4800); // FONA if you're using hardware serial
 
-  pinMode(FONA_KEY, OUTPUT);
-  pinMode(FONA_PS, INPUT);
-  
-  digitalWrite(FONA_KEY, HIGH);
-
-  // Power up the FONA if it needs it
-  if (digitalRead(FONA_PS) == LOW) {
-    Serial.print(F("Powering FONA on..."));
-    while (digitalRead(FONA_PS) == LOW) {
-      digitalWrite(FONA_KEY, LOW);
-      delay(200);
-    }
-    digitalWrite(FONA_KEY, HIGH);
-    Serial.println(F(" done."));
-  }
-  
   // See if the FONA is responding
-  if (! fona.begin(Serial1)) {
+  if (! fona.begin(Serial1)) {           // can also try fona.begin(Serial1) 
     Serial.println(F("Couldn't find FONA"));
+    while (1);
   }
-  else {
-    Serial.println(F("FONA is OK"));
-  }
-
-  // Print SIM card IMEI number.
-  char imei[15] = {0}; // MUST use a 16 character buffer for IMEI!
-  uint8_t imeiLen = fona.getIMEI(imei);
-  if (imeiLen > 0) {
-    Serial.print("SIM card IMEI: "); Serial.println(imei);
-  }
-
-  printMenu();
+  Serial.println(F("FONA is OK"));
 
   display.print("...\nBluetooth");
 
@@ -233,17 +187,17 @@ void setup(void) {
   // every 1 millisecond, and read data from the GPS for you. that makes the
   // loop code a heck of a lot easier!
 
-  delay(1000);
-  // Ask for firmware version
-  GPSSerial.println(PMTK_Q_RELEASE);
-
-  display.print("...\n9DOF");
-
 #ifdef __arm__
   usingInterrupt = false;  //NOTE - we don't want to use interrupts on the Due
 #else
   useInterrupt(true);
 #endif
+
+  delay(1000);
+  // Ask for firmware version
+  GPSSerial.println(PMTK_Q_RELEASE);
+
+  display.print("...\n9DOF");
   
   // Initialise the LSM9DS0 board.
   if(!lsm.begin())
@@ -254,49 +208,35 @@ void setup(void) {
   }
   
   // Setup the sensor gain and integration time.
-  configureLSM9DS0();  
-  
-  // Neopixels
-//  strip.begin();
-//  strip.show(); // Initialize all pixels to 'off'
-  display.print("...");
+  configureLSM9DS0();    
+  display.print("...");  
+
+  // Housekeeping
+  pinMode(22, INPUT_PULLUP);
+  pinMode(23, INPUT_PULLUP);  
 }
 
-/*************
- Housekeeping 
-*************/
-byte A8Pressed = 0;
-byte A9Pressed = 0;
 
-uint32_t timer = 0;
-uint32_t lastMillis9dof = 0;
-uint32_t lastMillisFona = 0;
-
-/**********************************************************************/
-/**********************************************************************/
 void loop() {
-  // Ooh 'buttons'!
-  if (touchRead(A8) > 2000 && A8Pressed == 0) {
-    A8Pressed = 1;
-    Serial.print(touchRead(A8));
-    sendLocation();
-  } else if (touchRead(A8 < 900)) {
-    A8Pressed = 0;
+  // Buttons!
+  button0.update();
+  button1.update();
+  
+  if (button0.fallingEdge()) {
+    largebatt = !largebatt;
   }
-  if (touchRead(A9) > 2000 && A9Pressed == 0) {
-    A9Pressed = 1;
-    Serial.print(touchRead(A9));
-    Serial.println("A9"); 
-  } else if (touchRead(A9 < 900)) {
-    A9Pressed = 0;
+  if (button1.fallingEdge()) {
   }
+
+  // Headlight code.
+  analogWrite(6,map(analogRead(A0), 0,500,128,0));
   
 /**********
-  9DOF & AHRS
+9DOF & AHRS
 ***********/  
-   sensors_vec_t   orientation; 
+  sensors_vec_t orientation; 
   // Use the simple AHRS function to get the current orientation.
-  if (millis() - lastMillis9dof > 500 && ahrs.getOrientation(&orientation))
+  if (millis() - lastMillis9dof > 1000 && ahrs.getOrientation(&orientation))
   {
     int heading = orientation.heading + 180;
     display.setCursor(0,57);
@@ -327,6 +267,7 @@ void loop() {
     }
     lastMillis9dof = millis();
   }
+  
 /**********
  GPS
 ***********/
@@ -340,7 +281,7 @@ void loop() {
     if (GPSECHO)
       if (c) Serial.print(c);
   }
-
+  
   // if a sentence is received, we can check the checksum, parse it...
   if (GPS.newNMEAreceived()) {
     // a tricky thing here is if we print the NMEA sentence, or data
@@ -355,12 +296,11 @@ void loop() {
   // if millis() or timer wraps around, we'll just reset it
   if (timer > millis())  timer = millis();
 
-  // every 10 seconds or so, print out the current stats
+  // approximately every 10 seconds or so, print out the current stats
   if (millis() - timer > 10000) { 
     timer = millis(); // reset the timer
     char time[5];
     // ToDo: timezone implementation
-    // 02:60 & 165:8
     sprintf(time, "%2d:%02d", GPS.hour+1, GPS.minute);
     display.setCursor(65,57);
     display.print(time);
@@ -377,7 +317,7 @@ void loop() {
     Serial.print("Fix: "); Serial.print((int)GPS.fix);
     Serial.print(" quality: "); Serial.println((int)GPS.fixquality); */
     if (GPS.fix) {
-      display.drawChar(91,0,'*',WHITE,BLACK,1);
+      display.drawChar(91,16,'G',WHITE,BLACK,1);
       /*display.print(GPS.latitude, 4); display.print(':');
       display.println(GPS.longitude, 4);*/
       /*Serial.print("Location: ");
@@ -391,7 +331,7 @@ void loop() {
       Serial.print("Satellites: "); Serial.println((int)GPS.satellites);*/      
     }
     else {
-      display.drawChar(91,0,'+',RED,BLACK,1);
+      display.drawChar(91,16,'g',WHITE,BLACK,1);
     }
   }  
 
@@ -399,7 +339,7 @@ void loop() {
  GSM/FONA
 ***********/  
   // Every minute update battery percentage.
-  if (millis() - lastMillisFona > 6000) {
+  if (millis() - lastMillisFona > 10000) {
     // +/- 125 msec
     fona.getBattPercent(&battpercent);
     Serial.print(F("Batterij:"));
@@ -414,15 +354,39 @@ void loop() {
     display.setCursor(48,57);
     display.print(r);
     lastMillisFona = millis(); // reset the timer    
+
+    if (GPS.fix && GPS.HDOP < 5 && GPS.HDOP != 0) {
+      current_location.set(GPS);
+      Serial.print(F("Location: "));
+      Serial.print(current_location.latitude, 6);
+      Serial.print(F(", "));
+      Serial.print(current_location.longitude, 6);
+      Serial.print(F(", "));
+      Serial.println(current_location.altitude, 2);
+      Serial.print(F("HDOP: ")); Serial.println(GPS.HDOP);
+      sendLocation(orientation.heading + 180, battpercent);
+    }
   }
 
   if (Serial.available()) {
   char command = Serial.read();
     Serial.println(command);
     
+    
     switch (command) {
       case '?': {
         printMenu();
+        break;
+      }
+      
+      case 'a': {
+        // read the ADC
+        uint16_t adc;
+        if (! fona.getADCVoltage(&adc)) {
+          Serial.println(F("Failed to read ADC"));
+        } else {
+          Serial.print(F("ADC = ")); Serial.print(adc); Serial.println(F(" mV"));
+        }
         break;
       }
       
@@ -442,6 +406,22 @@ void loop() {
             Serial.print(F("VPct = ")); Serial.print(vbat); Serial.println(F("%"));
           }
    
+          break;
+      }
+  
+      case 'U': {
+          // Unlock the SIM with a PIN code
+          char PIN[5];
+          flushSerial();
+          Serial.println(F("Enter 4-digit PIN"));
+          readline(PIN, 3);
+          Serial.println(PIN);
+          Serial.print(F("Unlocking SIM card: "));
+          if (! fona.unlockSIM(PIN)) {
+            Serial.println(F("Failed"));
+          } else {
+            Serial.println(F("OK!"));
+          }        
           break;
       }
   
@@ -487,6 +467,310 @@ void loop() {
           break;
       }
       
+      /*** Audio ***/
+      case 'v': {
+        // set volume
+        flushSerial();
+        Serial.print(F("Set Vol %"));
+        uint8_t vol = readnumber();
+        Serial.println();
+        if (! fona.setVolume(vol)) {
+          Serial.println(F("Failed"));
+        } else {
+          Serial.println(F("OK!"));
+        }
+        break;
+      }
+  
+      case 'V': {
+        uint8_t v = fona.getVolume();
+        Serial.print(v); Serial.println("%");
+      
+        break; 
+      }
+      
+      case 'H': {
+        // Set Headphone output
+        if (! fona.setAudio(FONA_HEADSETAUDIO)) {
+          Serial.println(F("Failed"));
+        } else {
+          Serial.println(F("OK!"));
+        }
+        fona.setMicVolume(FONA_HEADSETAUDIO, 15);
+        break;
+      }
+      case 'e': {
+        // Set External output
+        if (! fona.setAudio(FONA_EXTAUDIO)) {
+          Serial.println(F("Failed"));
+        } else {
+          Serial.println(F("OK!"));
+        }
+  
+        fona.setMicVolume(FONA_EXTAUDIO, 10);
+        break;
+      }
+  
+      case 'T': {
+        // play tone
+        flushSerial();
+        Serial.print(F("Play tone #"));
+        uint8_t kittone = readnumber();
+        Serial.println();
+        // play for 1 second (1000 ms)
+        if (! fona.playToolkitTone(kittone, 1000)) {
+          Serial.println(F("Failed"));
+        } else {
+          Serial.println(F("OK!"));
+        }
+        break;
+      }
+      
+      /*** FM Radio ***/
+      
+      case 'f': {
+        // get freq
+        flushSerial();
+        Serial.print(F("FM Freq (eg 1011 == 101.1 MHz): "));
+        uint16_t station = readnumber();
+        Serial.println();
+        // FM radio ON using headset
+        if (fona.FMradio(true, FONA_HEADSETAUDIO)) {
+          Serial.println(F("Opened"));
+        }
+       if (! fona.tuneFMradio(station)) {
+          Serial.println(F("Failed"));
+        } else {
+          Serial.println(F("Tuned"));
+        }
+        break;
+      }
+      case 'F': {
+        // FM radio off
+        if (! fona.FMradio(false)) {
+          Serial.println(F("Failed"));
+        } else {
+          Serial.println(F("OK!"));
+        }
+        break;
+      }
+      case 'm': {
+        // Set FM volume.
+        flushSerial();
+        Serial.print(F("Set FM Vol [0-6]:"));
+        uint8_t vol = readnumber();
+        Serial.println();
+        if (!fona.setFMVolume(vol)) {
+          Serial.println(F("Failed"));
+        } else {
+          Serial.println(F("OK!"));
+        }
+        break;
+      }
+      case 'M': {
+        // Get FM volume.
+        uint8_t fmvol = fona.getFMVolume();
+        if (fmvol < 0) {
+          Serial.println(F("Failed"));
+        } else {
+          Serial.print(F("FM volume: "));
+          Serial.println(fmvol, DEC);
+        }
+        break;
+      }
+      case 'q': {
+        // Get FM station signal level (in decibels).
+        flushSerial();
+        Serial.print(F("FM Freq (eg 1011 == 101.1 MHz): "));
+        uint16_t station = readnumber();
+        Serial.println();
+        int8_t level = fona.getFMSignalLevel(station);
+        if (level < 0) {
+          Serial.println(F("Failed! Make sure FM radio is on (tuned to station)."));
+        } else {
+          Serial.print(F("Signal level (dB): "));
+          Serial.println(level, DEC);
+        }
+        break;
+      }
+      
+      /*** PWM ***/
+      
+      case 'P': {
+        // PWM Buzzer output @ 2KHz max
+        flushSerial();
+        Serial.print(F("PWM Freq, 0 = Off, (1-2000): "));
+        uint16_t freq= readnumber();
+        Serial.println();
+        if (! fona.PWM(freq)) {
+          Serial.println(F("Failed"));
+        } else {
+          Serial.println(F("OK!"));
+        }
+        break;
+      }
+  
+      /*** Call ***/
+      case 'c': {      
+        // call a phone!
+        char number[30];
+        flushSerial();
+        Serial.print(F("Call #"));
+        readline(number, 30);
+        Serial.println();
+        Serial.print(F("Calling ")); Serial.println(number);
+        if (!fona.callPhone(number)) {
+          Serial.println(F("Failed"));
+        } else {
+          Serial.println(F("Sent!"));
+        }
+        
+        break;
+      }
+      case 'h': {
+         // hang up! 
+        if (! fona.hangUp()) {
+          Serial.println(F("Failed"));
+        } else {
+          Serial.println(F("OK!"));
+        }
+        break;     
+      }
+  
+      case 'p': {
+         // pick up! 
+        if (! fona.pickUp()) {
+          Serial.println(F("Failed"));
+        } else {
+          Serial.println(F("OK!"));
+        }
+        break;     
+      }
+      
+      /*** SMS ***/
+      
+      case 'N': {
+          // read the number of SMS's!
+          int8_t smsnum = fona.getNumSMS();
+          if (smsnum < 0) {
+            Serial.println(F("Could not read # SMS"));
+          } else {
+            Serial.print(smsnum); 
+            Serial.println(F(" SMS's on SIM card!"));
+          }
+          break;
+      }
+      case 'r': {
+        // read an SMS
+        flushSerial();
+        Serial.print(F("Read #"));
+        uint8_t smsn = readnumber();
+        Serial.print(F("\n\rReading SMS #")); Serial.println(smsn);
+  
+        // Retrieve SMS sender address/phone number.
+        if (! fona.getSMSSender(smsn, replybuffer, 250)) {
+          Serial.println("Failed!");
+          break;
+        }
+        Serial.print(F("FROM: ")); Serial.println(replybuffer);
+  
+        // Retrieve SMS value.
+        uint16_t smslen;
+        if (! fona.readSMS(smsn, replybuffer, 250, &smslen)) { // pass in buffer and max len!
+          Serial.println("Failed!");
+          break;
+        }
+        Serial.print(F("***** SMS #")); Serial.print(smsn); 
+        Serial.print(" ("); Serial.print(smslen); Serial.println(F(") bytes *****"));
+        Serial.println(replybuffer);
+        Serial.println(F("*****"));
+        
+        break;
+      }
+      case 'R': {
+        // read all SMS
+        int8_t smsnum = fona.getNumSMS();
+        uint16_t smslen;
+        for (int8_t smsn=1; smsn<=smsnum; smsn++) {
+          Serial.print(F("\n\rReading SMS #")); Serial.println(smsn);
+          if (!fona.readSMS(smsn, replybuffer, 250, &smslen)) {  // pass in buffer and max len!
+             Serial.println(F("Failed!"));
+             break;
+          }
+          // if the length is zero, its a special case where the index number is higher
+          // so increase the max we'll look at!
+          if (smslen == 0) {
+            Serial.println(F("[empty slot]"));
+            smsnum++;
+            continue;
+          }
+          
+          Serial.print(F("***** SMS #")); Serial.print(smsn); 
+          Serial.print(" ("); Serial.print(smslen); Serial.println(F(") bytes *****"));
+          Serial.println(replybuffer);
+          Serial.println(F("*****"));
+        }
+        break;
+      }
+  
+      case 'd': {
+        // delete an SMS
+        flushSerial();
+        Serial.print(F("Delete #"));
+        uint8_t smsn = readnumber();
+        
+        Serial.print(F("\n\rDeleting SMS #")); Serial.println(smsn);
+        if (fona.deleteSMS(smsn)) {
+          Serial.println(F("OK!"));
+        } else {
+          Serial.println(F("Couldn't delete"));
+        }
+        break;
+      }
+      
+      case 's': {
+        // send an SMS!
+        char sendto[21], message[141];
+        flushSerial();
+        Serial.print(F("Send to #"));
+        readline(sendto, 20);
+        Serial.println(sendto);
+        Serial.print(F("Type out one-line message (140 char): "));
+        readline(message, 140);
+        Serial.println(message);
+        if (!fona.sendSMS(sendto, message)) {
+          Serial.println(F("Failed"));
+        } else {
+          Serial.println(F("Sent!"));
+        }
+        
+        break;
+      }
+  
+      /*** Time ***/
+  
+      case 'y': {
+        // enable network time sync
+        if (!fona.enableNetworkTimeSync(true))
+          Serial.println(F("Failed to enable"));
+        break;
+      }
+  
+      case 'Y': {
+        // enable NTP time sync
+        if (!fona.enableNTPTimeSync(true, F("pool.ntp.org")))
+          Serial.println(F("Failed to enable"));
+        break;
+      }
+  
+      case 't': {
+          // read the time
+          char buffer[23];
+  
+          fona.getTime(buffer, 23);  // make sure replybuffer is at least 23 bytes!
+          Serial.print(F("Time = ")); Serial.println(buffer);
+          break;
+      }
   
       /*********************************** GPRS */
       
@@ -502,7 +786,20 @@ void loop() {
            Serial.println(F("Failed to turn on"));
          break;
       }
-
+      case 'l': {
+         // check for GSMLOC (requires GPRS)
+         uint16_t returncode;
+         
+         if (!fona.getGSMLoc(&returncode, replybuffer, 250))
+           Serial.println(F("Failed!"));
+         if (returncode == 0) {
+           Serial.println(replybuffer);
+         } else {
+           Serial.print(F("Fail code #")); Serial.println(returncode);
+         }
+         
+         break;
+      }
       case 'w': {
         // read website URL
         uint16_t statuscode;
@@ -524,8 +821,13 @@ void loop() {
            while (fona.available()) {
              char c = fona.read();
              
-             // Serial.write on Teensy is fast enough. Atmega uses tricks here.
+             // Serial.write is too slow, we'll write directly to Serial register!
+  #if defined(__AVR_ATmega328P__) || defined(__AVR_ATmega168__)
+             loop_until_bit_is_set(UCSR0A, UDRE0); /* Wait until data register empty. */
+             UDR0 = c;
+  #else
              Serial.write(c);
+  #endif
              length--;
              if (! length) break;
            }
@@ -560,7 +862,12 @@ void loop() {
            while (fona.available()) {
              char c = fona.read();
              
+  #if defined(__AVR_ATmega328P__) || defined(__AVR_ATmega168__)
+             loop_until_bit_is_set(UCSR0A, UDRE0); /* Wait until data register empty. */
+             UDR0 = c;
+  #else
              Serial.write(c);
+  #endif
              
              length--;
              if (! length) break;
@@ -597,7 +904,6 @@ void loop() {
       Serial.write(fona.read());
     }    
   }
-
 
 /**********
  BLUETOOTH
@@ -655,17 +961,6 @@ void loop() {
       BTLEserial.write(sendbuffer, sendbuffersize);
     }
   }
-
-/**********
- NEOPIXELS
-***********/  
-  // NeoPixels constant value.
-//  strip.setPixelColor(0, strip.Color(GPS.minute/4,GPS.hour/2,GPS.seconds/4));
-//  strip.setPixelColor(1, strip.Color(1,0,0));
-//  strip.setPixelColor(3, strip.Color(3,0,0));
-//  strip.setPixelColor(5, strip.Color(5,0,0));
-//  strip.setPixelColor(7, strip.Color(7,0,0));
-//  strip.show();
 }
 
 void flushSerial() {
@@ -735,12 +1030,37 @@ uint8_t readline(char *buff, uint8_t maxbuff, uint16_t timeout) {
 void printMenu(void) {
    Serial.println(F("-------------------------------------"));
    Serial.println(F("[?] Print this menu"));
+   Serial.println(F("[a] read the ADC (2.8V max)"));
    Serial.println(F("[b] read the Battery V and % charged"));
    Serial.println(F("[C] read the SIM CCID"));
+   Serial.println(F("[U] Unlock SIM with PIN code"));
    Serial.println(F("[i] read RSSI"));
    Serial.println(F("[n] get Network status"));
+   Serial.println(F("[v] set audio Volume"));
+   Serial.println(F("[V] get Volume"));
+   Serial.println(F("[H] set Headphone audio"));
+   Serial.println(F("[e] set External audio"));
+   Serial.println(F("[T] play audio Tone"));
+   Serial.println(F("[f] tune FM radio"));
+   Serial.println(F("[F] turn off FM"));
+   Serial.println(F("[m] set FM volume"));
+   Serial.println(F("[M] get FM volume"));
+   Serial.println(F("[q] get FM station signal level"));
+   Serial.println(F("[P] PWM/Buzzer out"));
+   Serial.println(F("[c] make phone Call"));
+   Serial.println(F("[h] Hang up phone"));
+   Serial.println(F("[p] Pick up phone"));
+   Serial.println(F("[N] Number of SMSs"));
+   Serial.println(F("[r] Read SMS #"));
+   Serial.println(F("[R] Read All SMS"));
+   Serial.println(F("[d] Delete SMS #"));
+   Serial.println(F("[s] Send SMS"));
+   Serial.println(F("[y] Enable network time sync"));   
+   Serial.println(F("[Y] Enable NTP time sync (GPRS)"));   
+   Serial.println(F("[t] Get network time"));   
    Serial.println(F("[G] Enable GPRS"));
    Serial.println(F("[g] Disable GPRS"));
+   Serial.println(F("[l] Query GSMLOC (GPRS)"));
    Serial.println(F("[w] Read webpage (GPRS)"));
    Serial.println(F("[W] Post to website (GPRS)"));
    Serial.println(F("[S] create Serial passthru tunnel"));
@@ -749,16 +1069,65 @@ void printMenu(void) {
   
 }
 
-void sendLocation () {
+
+#ifdef __AVR__
+// Interrupt is called once a millisecond, looks for any new GPS data, and stores it
+SIGNAL(TIMER0_COMPA_vect) {
+  char c = GPS.read();
+  // if you want to debug, this is a good time to do it!
+#ifdef UDR0
+  if (GPSECHO)
+    if (c) UDR0 = c;  
+    // writing direct to UDR0 is much much faster than Serial.print 
+    // but only one character can be written at a time. 
+#endif
+}
+
+void useInterrupt(boolean v) {
+  if (v) {
+    // Timer0 is already used for millis() - we'll just interrupt somewhere
+    // in the middle and call the "Compare A" function above
+    OCR0A = 0xAF;
+    TIMSK0 |= _BV(OCIE0A);
+    usingInterrupt = true;
+  } else {
+    // do not call the interrupt function COMPA anymore
+    TIMSK0 &= ~_BV(OCIE0A);
+    usingInterrupt = false;
+  }
+}
+#endif //#ifdef__AVR__
+
+void sendLocation (uint16_t heading, uint16_t vbat) {
   char url[160];
   uint16_t statuscode;
   int16_t length;
 
-  char latitude_c[12];
+  uint32_t latint;
+  uint32_t longint;
+  char vbatc[4];
+  char headingc[4];
+  char Lat_c1[3];
+  char Lat_c2[8];
+  char Long_c1[3];
+  char Long_c2[8];
 
-  sprintf (url, "http://data.sparkfun.com/input/%s?private_key=%s&latitude=%s&longitude=%s&battery=%s&heading=%s",
-    SPARKFUN_PUBLIC_KEY, SPARKFUN_PRIVATE_KEY, GPS.latitude, GPS.longitude, battpercent, 123);
+  fona.getBattPercent(&vbat);
+  itoa(vbat, vbatc, 10);
+  itoa(heading, headingc, 10);
+  
+  itoa(current_location.latitude,Lat_c1,10);
+  itoa(current_location.longitude,Long_c1,10);
+  
+  latint = (current_location.latitude-int(current_location.latitude))*10000000;
+  itoa(latint,Lat_c2,10);
+  
+  longint = (current_location.longitude-int(current_location.longitude))*10000000;
+  itoa(longint,Long_c2,10);
 
+  sprintf (url, "http://data.sparkfun.com/input/%s?private_key=%s&latitude=%s.%s&longitude=%s.%s&battery=%s&heading=%s&herman=%s",
+    SPARKFUN_PUBLIC_KEY, SPARKFUN_PRIVATE_KEY, Lat_c1, Lat_c2, Long_c1, Long_c2, vbatc, headingc, "1");
+  
   Serial.print(F("Sending: ")); Serial.println(url);
 
   uint8_t rssi = fona.getRSSI();
@@ -768,14 +1137,18 @@ void sendLocation () {
     // When this happens you can't turn it on aagin, but you don't need to because it's on.  So don't sweat
     // the error case here -- GPRS could already be on -- just keep on keeping on and let HTTP_GET_start()
     // error if there's a problem with GPRS.
+    display.setCursor(0,8);
+    display.print("GPRS       ");      
     if (!fona.enableGPRS(true)) {
       Serial.println(F("Failed to turn GPRS on!"));
     }
 
     if (fona.HTTP_GET_start(url, &statuscode, (uint16_t *)&length)) {
+      display.setCursor(0,8);
       while (length > 0) {
         while (fona.available()) {
           char c = fona.read();
+          display.print(c);
           Serial.print(c);
           length--;
           if (! length) break;
