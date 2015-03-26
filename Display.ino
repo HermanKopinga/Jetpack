@@ -7,12 +7,19 @@ void disMinute () {
     display.print(battpercent);
     display.print("%");
     lastMillisFona = millis(); // reset the timer    
-    byte RSSI = fona.getRSSI();
     
     uint8_t r = map(fona.getRSSI(), 0, 31, 1, 5);
     display.setCursor(48,57);
     display.print(r);
     lastMillisFona = millis(); // reset the timer    
+
+    if (largebatt) {
+      display.setTextSize(4);
+      display.setCursor(8,18);
+      display.print(battpercent);
+      display.print("%");
+      display.setTextSize(1);
+    }
 
     if (GPS.fix && GPS.HDOP < 5 && GPS.HDOP != 0) {
       current_location.set(GPS);
@@ -94,4 +101,8 @@ void disSecond() {
     display.print(heading);          
   }
   lastMillis9dof = millis();
+}
+
+void clearMiddle() {
+  display.fillRect(0,8,89,49,BLACK);
 }

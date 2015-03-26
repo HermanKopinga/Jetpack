@@ -226,7 +226,9 @@ void loop() {
   button1.update();
   
   if (button0.fallingEdge()) {
+    clearMiddle();
     largebatt = !largebatt;
+    disMinute();
   }
   if (button1.fallingEdge()) {
   }
