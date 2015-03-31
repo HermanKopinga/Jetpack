@@ -110,7 +110,7 @@ float p = 3.1415926;
 sensors_vec_t orientation; 
 
 // Create LSM9DS0 board instance.
-Adafruit_LSM9DS0     lsm(1000);  // Use I2C, ID #1000
+Adafruit_LSM9DS0 lsm(1000);  // Use I2C, ID #1000
 
 // Create simple AHRS algorithm using the LSM9DS0 instance's accelerometer and magnetometer.
 Adafruit_Simple_AHRS ahrs(&lsm.getAccel(), &lsm.getMag());
@@ -124,6 +124,11 @@ void configureLSM9DS0(void)
   lsm.setupMag(lsm.LSM9DS0_MAGGAIN_2GAUSS);     // 2.) Set the magnetometer sensitivity
   lsm.setupGyro(lsm.LSM9DS0_GYROSCALE_245DPS);  // 3.) Setup the gyroscope
 }
+
+/*******************
+ATTINY i2c leddriver
+*******************/
+const int ledAddress = 0x26;
 
 /*************
  Housekeeping
@@ -231,6 +236,14 @@ void loop() {
     disMinute();
   }
   if (button1.fallingEdge()) {
+    Wire.beginTransmission(ledAddress);
+    Wire.write(0x4);
+    Wire.endTransmission();
+  }
+  if (button1.risingEdge()) {
+    Wire.beginTransmission(ledAddress);
+    Wire.write(0x0);
+    Wire.endTransmission();
   }
 
   // Headlight code.
