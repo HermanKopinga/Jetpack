@@ -38,7 +38,7 @@ void dis10S() {
   timer = millis(); // reset the timer
   char time[5];
   // ToDo: timezone implementation
-  sprintf(time, "%2d:%02d", GPS.hour+1, GPS.minute);
+  sprintf(time, "%2d:%02d", GPS.hour+2, GPS.minute);
   display.setCursor(65,57);
   display.print(time);
   /*
