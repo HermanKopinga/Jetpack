@@ -95,13 +95,13 @@ void useInterrupt(boolean); // Func prototype keeps Arduino 0023 happy
 #define GREY            0x38E7
 
 // Option 1: use any pins but a little slower
-Adafruit_SSD1331 display = Adafruit_SSD1331(cs, dc, mosi, sclk, rst);  
+//Adafruit_SSD1331 display = Adafruit_SSD1331(cs, dc, mosi, sclk, rst);  
 
 // Option 2: must use the hardware SPI pins 
 // (for UNO thats sclk = 13 and sid = 11) and pin 10 must be 
 // an output. This is much faster - also required if you want
 // to use the microSD card (see the image drawing example)
-//Adafruit_SSD1331 display = Adafruit_SSD1331(cs, dc, rst);
+Adafruit_SSD1331 display = Adafruit_SSD1331(cs, dc, rst);
 
 /************
  9DOF & AHRS
@@ -141,6 +141,10 @@ Bounce button1 = Bounce(23, 10);
 int largebatt = 0;
 
 void setup(void) {
+  // This boudrate is ignored by Teensy, always runs at full USB speed.
+  Serial.begin(115200);  
+  BTLEserial.begin();  // ToDo: needs to initialize before display. Fix: learn SSD1331 driver proper transactions.
+
   // Initialize display first
   display.begin();
   display.fillScreen(BLACK);  
@@ -149,10 +153,8 @@ void setup(void) {
   display.setTextColor(WHITE, BLACK);  
   display.print(" Jetpack\n\n");
   
-  display.print("Serial");   
+  display.print("Serial...\nBluetooth...\n");
   
-  // This boudrate is ignored by Teensy, always runs at full USB speed.
-  Serial.begin(115200);  
   Serial.println(F("Initializing FONA.... (May take 3 seconds)"));
 
   display.print("...\nFona");
@@ -165,10 +167,6 @@ void setup(void) {
     while (1);
   }
   Serial.println(F("FONA is OK"));
-
-  display.print("...\nBluetooth");
-
-  BTLEserial.begin();
 
   display.print("...\nGPS");
 
@@ -315,7 +313,8 @@ void loop() {
     // print it out!
     if (status == ACI_EVT_DEVICE_STARTED) {
         Serial.println(F("* Advertising started"));
-        display.drawChar(91,8,'b',WHITE,BLACK,1);        
+        delay(100);                                    // ToDo: SPI bug is here.
+        display.drawChar(91,8,'b',WHITE,BLACK,1);
     }
     if (status == ACI_EVT_CONNECTED) {
         Serial.println(F("* Connected!"));
