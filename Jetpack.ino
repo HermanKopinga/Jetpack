@@ -157,7 +157,7 @@ void setup(void) {
   
   Serial.println(F("Initializing FONA.... (May take 3 seconds)"));
 
-  display.print("...\nFona");
+  display.print("Fona");
 
   Serial1.begin(4800); // FONA if you're using hardware serial
 
