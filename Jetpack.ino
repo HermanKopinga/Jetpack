@@ -1,4 +1,5 @@
 // Jetpack for devhouse Spindle.
+// https://github.com/HermanKopinga/Jetpack
 // By: herman@kopinga.nl
 // BSD license
 
@@ -25,7 +26,6 @@
 #include "keys.h"
 #include "Location.h"
 #include <Bounce.h>
-
 
 /**********
  FONA
@@ -133,13 +133,26 @@ const int ledAddress = 0x26;
 /*************
  Housekeeping
 *************/ 
+#define STATUSLED 2
+#define HEADLIGHT 6
+#define BUTTONPIN0 22
+#define BUTTONPIN1 23
+#define LIGHTSENSOR A0
 uint32_t timer = millis();
 uint32_t lastMillis9dof = 0;
 uint32_t lastMillisFona = 0;
-Bounce button0 = Bounce(22, 10);
-Bounce button1 = Bounce(23, 10);
+Bounce button0 = Bounce(BUTTONPIN0, 10);
+Bounce button1 = Bounce(BUTTONPIN1, 10);
 int largebatt = 0;
+unsigned long currentMillis = millis();
+unsigned long blinkBreak = 1000;
+unsigned long previousBlink = 0;
+unsigned long headlightBreak = 50;
+unsigned long previousHeadlight = 0;
 
+/*************
+    SETUP
+*************/ 
 void setup(void) {
   // This boudrate is ignored by Teensy, always runs at full USB speed.
   Serial.begin(115200);  
@@ -218,12 +231,18 @@ void setup(void) {
   display.print("...");  
 
   // Housekeeping
-  pinMode(22, INPUT_PULLUP);
-  pinMode(23, INPUT_PULLUP);  
+  pinMode(BUTTONPIN0, INPUT_PULLUP);
+  pinMode(BUTTONPIN1, INPUT_PULLUP);  
+  pinMode(LIGHTSENSOR, INPUT);
+  pinMode(STATUSLED, OUTPUT);
+  pinMode(HEADLIGHT, OUTPUT);
 }
 
 
 void loop() {
+  // Millis is used multiple times in the loop, save it locally :)
+  currentMillis = millis();
+  
   // Buttons!
   button0.update();
   button1.update();
@@ -243,15 +262,24 @@ void loop() {
     Wire.write(0x0);
     Wire.endTransmission();
   }
+   
+  // Blink internal LED: working.
+  if ((unsigned long)(currentMillis - previousBlink) >= blinkBreak) {
+    digitalWrite(STATUSLED, !digitalRead(STATUSLED));
+    previousBlink = currentMillis;
+  }
 
   // Headlight code.
-  analogWrite(6,map(analogRead(A0), 0,500,128,0));
+  if ((unsigned long)(currentMillis - previousHeadlight) >= headlightBreak) {
+    analogWrite(HEADLIGHT,map(analogRead(LIGHTSENSOR), 0,500,128,0));
+    previousHeadlight = currentMillis;
+  }
   
 /**********
 9DOF & AHRS
 ***********/  
   // Use the simple AHRS function to get the current orientation.
-  if (millis() - lastMillis9dof > 1000 && ahrs.getOrientation(&orientation)) {
+  if (currentMillis - lastMillis9dof > 1000 && ahrs.getOrientation(&orientation)) {
     disSecond();
   }
   
@@ -281,10 +309,10 @@ void loop() {
   }
 
   // if millis() or timer wraps around, we'll just reset it
-  if (timer > millis())  timer = millis();
+  if (timer > currentMillis)  timer = currentMillis;
 
   // approximately every 10 seconds or so, print out the current stats
-  if (millis() - timer > 10000) { 
+  if (currentMillis - timer > 10000) { 
     dis10S();
   }  
 
@@ -292,7 +320,7 @@ void loop() {
  GSM/FONA
 ***********/  
   // Every minute update battery percentage.
-  if (millis() - lastMillisFona > 10000) {
+  if (currentMillis - lastMillisFona > 10000) {
     disMinute();
   }
 
